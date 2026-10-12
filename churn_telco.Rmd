@@ -1,0 +1,865 @@
+---
+title: "Prédire et limiter le churn d'un opérateur télécom"
+author: "Roman Delbare et David Doe"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: sandstone
+    highlight: kate
+---
+
+Projet du cours de programmation R (Master SIAD, Université de Lille). Le rapport métier qui accompagne ce code est dans `rapport/rapport_metier.pdf`.
+
+
+# Options globales
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      eval = TRUE,
+                      include = TRUE,
+                      warning = TRUE,
+                      message = TRUE)
+# Ce sont les options globales des blocs du document, ce bloc ne doit pas être modifié
+```
+
+
+# Extensions
+
+
+```{r}
+library(rmarkdown)
+library(markdown)
+library(questionr)
+library(dplyr)
+# Vous ajoutez vos extensions dans ce bloc de code
+# Vous devez à minima avoir ces librairies
+
+
+# install.packages("caret") Pour installer le package si besoin
+library(caret) # Pour la visualisation de matrices de confusion
+# install.packages("ggplot2") Pour installer le package si besoin
+library(ggplot2) # Pour les quelques visualisations du rapport métier
+```
+
+
+# Importation des données
+
+```{r}
+# Vous importez vos données dans ce bloc de code
+# Aucune sortie des données ne doit apparaître par la suite 
+# Une fois les données importées tout le reste doit pouvoir s'exécuter
+df = read.csv("donnees/telco_customer_churn.csv")
+```
+
+La suite de votre travail après cette ligne.
+
+
+# 1 Objectif du travail et dictionnaire de données : 
+
+Notre objectif est de construire un outil permettant de détecter et d'expliquer le churn, c'est à dire la perte de clients, d'une societé d'opérateur télécomunication afin de permettre à cette dernière de le limiter. Pour ce faire nous utiliserons une base de données reprenant des informations relatives à 7043 clients de la societé. 
+
+Ce travail à pour objectif de répondre à la problématique suivante : 
+"Est-il possible de construire un outil permettant d’aider efficacement à limiter le churn pour l’entreprise ?"
+
+Les variables pour nous aider dans ce travail sont les suivantes : 
+
+- Customer ID : identifiant client, sert de clé primaire
+- Gender : sexe du client 
+- SeniorCitizen : le client est-il âgé ?
+- Partner : le client a-t-il un partenaire ? 
+- Dependents : le client a-t-il des personnes à charge ? 
+- tenure : ancienneté en mois 
+- PhoneService : le client dispose d'un service téléphonique ? 
+- MutlipleLines : le client a-t-il plusieurs numéros ? 
+- InternetService : Moyen d'accès à internet du client 
+- OnlineSecurity : le client dispose-t-il d'un service de sécurité en ligne?
+- OnlineBackup : le client dispose-t-il d'un service de sauvegarde en ligne ? 
+- TechSupport : a-t-il une option prenant en charge le support technique ou non ? 
+- StreamingTv : possession d'un service de streaming télé ? 
+- StreamingMovies : possession d'un service de streaming de films ? 
+- Contract : type de contrat par exemple mensuel ou annuel 
+- PaperLessBilling : facture éléctronique ou papier 
+- PaymentMethode : Moyen de paiment du client 
+- MonthlyCHarges : Charges dont le client doit s'acquiter chaque mois 
+- TotalCHarges : La somme des charges qu'il à du payer jusqu'à présent 
+- Churn : A-t-on observé un churn pour ce client ? 
+
+
+# 2 Recodage des modalités 
+
+Nous commençons par un recodage des modalités pour ensuite pouvoir travailler sur des données claires et exploitables. 
+
+NB : pour gagner du temps et rester efficace, nous recodons en utilisant la fonction 'Levels recoding' vue en cours. 
+
+## 2.1 Recodage : sexe
+
+```{r}
+table(df$gender)
+```
+
+On voit que la modalité 'Homme' concerne un petit peu plus d'observations. 
+Ca sera donc notre référence (codé 0).
+
+```{r}
+## Recodage de df$gender en df$Femme
+df$Femme <- df$gender
+df$Femme[df$gender == "Female"] <- "1"
+df$Femme[df$gender == "Male"] <- "0"
+df$Femme <- as.numeric(df$Femme)
+```
+
+## 2.2 Recodage : partenaire 
+```{r}
+table(df$Partner)
+```
+La majorité des individus sondés sont célibataires : le célibat est ici notre référence. 
+Cela donne donc lieu au recodage suivant :
+```{r}
+## Recodage de df$Partner en df$Partner_oui
+df$Partner_oui <- df$Partner
+df$Partner_oui[df$Partner == "No"] <- "0"
+df$Partner_oui[df$Partner == "Yes"] <- "1"
+df$Partner_oui <- as.numeric(df$Partner_oui)
+```
+
+## 2.3 Recodage : Personnes à charge 
+
+```{r}
+table(df$Dependents)
+```
+De même la majorité des individus n'ont personnes à charge, soit le recodage suivant prenant cette situation comme référence :
+
+```{r}
+## Recodage de df$Dependents en df$Personne_a_charge_oui
+df$Personne_a_charge_oui <- df$Dependents
+df$Personne_a_charge_oui[df$Dependents == "No"] <- "0"
+df$Personne_a_charge_oui[df$Dependents == "Yes"] <- "1"
+df$Personne_a_charge_oui <- as.numeric(df$Personne_a_charge_oui)
+```
+
+## 2.4 Recodage : Service téléphonique 
+
+```{r}
+table(df$PhoneService)
+```
+La majorité des sondés ont ce service. Cette situation est donc la situation de référence :
+
+```{r}
+## Recodage de df$PhoneService en df$Service_tel_non
+df$Service_tel_non <- df$PhoneService
+df$Service_tel_non[df$PhoneService == "No"] <- "1"
+df$Service_tel_non[df$PhoneService == "Yes"] <- "0"
+df$Service_tel_non <- as.numeric(df$Service_tel_non)
+```
+
+## 2.5 Recodage : Plusieurs numéros 
+
+```{r}
+table(df$MultipleLines)
+```
+Ne pas avoir plusieurs numéros est la norme et va donc servir de référence. Ici on regroupe les modalités 'No' et 'No phone service' en une seule modalité 'Non' (servant de référence) car logiquement sans service téléphonique on ne peut pas avoir plusieurs numéros. 
+
+```{r}
+## Recodage de df$MultipleLines en df$Plusieurs_numero_oui
+df$Plusieurs_numero_oui <- df$MultipleLines
+df$Plusieurs_numero_oui[df$MultipleLines == "No"] <- "0"
+df$Plusieurs_numero_oui[df$MultipleLines == "No phone service"] <- "0"
+df$Plusieurs_numero_oui[df$MultipleLines == "Yes"] <- "1"
+df$Plusieurs_numero_oui <- as.numeric(df$Plusieurs_numero_oui)
+```
+
+
+## 2.6 Recodage : Accès internet 
+
+```{r}
+table(df$InternetService)
+```
+
+Avoir un accès à internet via la fibre va servir de référence car il s'agit de la modalité la plus représenté. Nous créons deux nouvelles variables binaires qui pourront servir, si on le souhaite, à prendre en compte dans la modélisation les cas ou le client ne possède pas internet ou alors les cas ou il a accès à internet par DSL. 
+
+```{r}
+## Recodage de df$InternetService en df$Internet_DSL
+df$Internet_DSL <- df$InternetService
+df$Internet_DSL[df$InternetService == "DSL"] <- "1"
+df$Internet_DSL[df$InternetService == "Fiber optic"] <- "0"
+df$Internet_DSL[df$InternetService == "No"] <- "0"
+df$Internet_DSL <- as.numeric(df$Internet_DSL)
+
+## Recodage de df$InternetService en df$Internet_Non
+df$Internet_Non <- df$InternetService
+df$Internet_Non[df$InternetService == "DSL"] <- "0"
+df$Internet_Non[df$InternetService == "Fiber optic"] <- "0"
+df$Internet_Non[df$InternetService == "No"] <- "1"
+df$Internet_Non <- as.numeric(df$Internet_Non)
+```
+
+## 2.7 Recodage : Service de sécurité en ligne 
+
+```{r}
+table(df$OnlineSecurity)
+```
+
+Ne pas avoir de dispositif de sécurité en ligne va servir de référence car il s'agit de la modalité la plus représenté. 
+Forcemment sans internet le client n'aura pas de securité en ligne. On regroupe donc le fait de ne pas avoir internet avec le fait de ne pas avoir de securité en ligne. 
+
+```{r}
+## Recodage de df$OnlineSecurity en df$Securite_oui
+df$Securite_oui <- df$OnlineSecurity
+df$Securite_oui[df$OnlineSecurity == "No"] <- "0"
+df$Securite_oui[df$OnlineSecurity == "No internet service"] <- "0"
+df$Securite_oui[df$OnlineSecurity == "Yes"] <- "1"
+df$Securite_oui <- as.numeric(df$Securite_oui)
+```
+
+## 2.8 Recodage : Sauvegarde en ligne 
+
+```{r}
+table(df$OnlineBackup)
+```
+
+On applique ici exactement la même logique que pour le recodage précédent 
+
+```{r}
+## Recodage de df$OnlineBackup en df$Sauvegarde_oui
+df$Sauvegarde_oui <- df$OnlineBackup
+df$Sauvegarde_oui[df$OnlineBackup == "No"] <- "0"
+df$Sauvegarde_oui[df$OnlineBackup == "No internet service"] <- "0"
+df$Sauvegarde_oui[df$OnlineBackup == "Yes"] <- "1"
+df$Sauvegarde_oui <- as.numeric(df$Sauvegarde_oui)
+```
+
+
+## 2.9 Recodage : Protection de son appareil 
+
+```{r}
+table(df$DeviceProtection)
+```
+
+Le même recodage que pour les chunks précédents est ici appliqué. 
+
+```{r}
+## Recodage de df$DeviceProtection en df$Protection_appareil_oui
+df$Protection_appareil_oui <- df$DeviceProtection
+df$Protection_appareil_oui[df$DeviceProtection == "No"] <- "0"
+df$Protection_appareil_oui[df$DeviceProtection == "No internet service"] <- "0"
+df$Protection_appareil_oui[df$DeviceProtection == "Yes"] <- "1"
+df$Protection_appareil_oui <- as.numeric(df$Protection_appareil_oui)
+```
+
+
+## 2.10 Recodage : Dispose d'une assistance technique 
+
+```{r}
+table(df$TechSupport)
+```
+
+Encore une fois, on regroupe les modalités 'No' et 'No internet service' dans une seule et même modalité de référence (car absurde d'avoir une assistance technique sans avoir internet).
+
+```{r}
+## Recodage de df$TechSupport en df$Assitance_technique_oui
+df$Assitance_technique_oui <- df$TechSupport
+df$Assitance_technique_oui[df$TechSupport == "No"] <- "0"
+df$Assitance_technique_oui[df$TechSupport == "No internet service"] <- "0"
+df$Assitance_technique_oui[df$TechSupport == "Yes"] <- "1"
+df$Assitance_technique_oui <- as.numeric(df$Assitance_technique_oui)
+```
+
+
+## 2.11 Recodage : Dispose d'une service de streaming TV 
+
+```{r}
+table(df$StreamingTV)
+```
+
+La même logique que pour les chunks précédents est appliquée ici : 
+
+```{r}
+## Recodage de df$StreamingTV en df$Streaming_oui
+df$Streaming_oui <- df$StreamingTV
+df$Streaming_oui[df$StreamingTV == "No"] <- "0"
+df$Streaming_oui[df$StreamingTV == "No internet service"] <- "0"
+df$Streaming_oui[df$StreamingTV == "Yes"] <- "1"
+df$Streaming_oui <- as.numeric(df$Streaming_oui)
+```
+
+
+## 2.12 Recodage : Dispose d'un service de streaming de films
+
+```{r}
+table(df$StreamingMovies)
+```
+Pareillement nous créons une nouvelle variable qui servira à modéliser si oui ou non l'assuré dispose d'un service de streaming de films. 
+La référence de cette variable sera la situation ou l'assuré ne possède pas ce type de service (couvrant également les cas ou il ne dispose pas d'un accès à internet car logiquement, sans internet aucun service de streaming n'est possible).
+
+```{r}
+## Recodage de df$StreamingMovies en df$Film_Streaming
+df$Film_Streaming <- df$StreamingMovies
+df$Film_Streaming[df$StreamingMovies == "No"] <- "0"
+df$Film_Streaming[df$StreamingMovies == "No internet service"] <- "0"
+df$Film_Streaming[df$StreamingMovies == "Yes"] <- "1"
+df$Film_Streaming <- as.numeric(df$Film_Streaming)
+```
+
+
+## 2.13 Recodage : Type de contrat
+
+```{r}
+table(df$Contract)
+```
+La majorité des clients sont liés à l'entreprise par des contrats mensuels. Nous considérerons que cette situatio fait office de référence et créeons ainsi deux nouvelles variables servant respectivement à modéliser les cas ou le client à souscrit à un abonemment sur un an et ceux ou il à souscrit à un abonnement sur deux ans. 
+
+
+```{r}
+## Recodage de df$Contract en df$Contrat_annu
+df$Contrat_annu <- df$Contract
+df$Contrat_annu[df$Contract == "Month-to-month"] <- "0"
+df$Contrat_annu[df$Contract == "One year"] <- "1"
+df$Contrat_annu[df$Contract == "Two year"] <- "0"
+df$Contrat_annu <- as.numeric(df$Contrat_annu)
+
+## Recodage de df$Contract en df$Contrat_deux_ans
+df$Contrat_deux_ans <- df$Contract
+df$Contrat_deux_ans[df$Contract == "Month-to-month"] <- "0"
+df$Contrat_deux_ans[df$Contract == "One year"] <- "0"
+df$Contrat_deux_ans[df$Contract == "Two year"] <- "1"
+df$Contrat_deux_ans <- as.numeric(df$Contrat_deux_ans)
+```
+
+## 2.14 Recodage : Moyen de facturation
+
+```{r}
+table(df$PaperlessBilling)
+```
+Ici on observe que le fait de recevoir ses factures par voie électronique concerne une majorité de clients. Néanmoins nous faisons le choix de recoder la variable en prenant comme situation de référence le cas ou les clients ne veulent pas d'une facture éléctronique. 
+Cette décision est simplement motivée par le fait que, dans le cas ou nous souhaiterions utiliser cette variable dans notre modélisation future, 
+nous trouvons qu'il est plus compréhensible/fluide d'exprimer l'effet induit par le fait de recevoir une facture éléctronique sur la probabilité de churn que dans l'autre sens. 
+
+```{r}
+## Recodage de df$PaperlessBilling en df$Factu_ele_oui
+df$Factu_ele_oui <- df$PaperlessBilling
+df$Factu_ele_oui[df$PaperlessBilling == "No"] <- "0"
+df$Factu_ele_oui[df$PaperlessBilling == "Yes"] <- "1"
+df$Factu_ele_oui <- as.numeric(df$Factu_ele_oui)
+```
+
+## 2.15 Recodage : Modalité de paiement 
+
+```{r}
+table(df$PaymentMethod)
+```
+Ici le paiement par cheque electronique est la modalité la plus représenté et servira de référence. Nous procédons à la création de 3 variables binaires servant à modéliser les autres moyens de paiement pour pouvoir observer l'effet de ces derniers par rapport à la référence. 
+
+```{r}
+## Recodage de df$PaymentMethod en df$Payment_virement
+df$Payment_virement <- df$PaymentMethod
+df$Payment_virement[df$PaymentMethod == "Bank transfer (automatic)"] <- "1"
+df$Payment_virement[df$PaymentMethod == "Credit card (automatic)"] <- "0"
+df$Payment_virement[df$PaymentMethod == "Electronic check"] <- "0"
+df$Payment_virement[df$PaymentMethod == "Mailed check"] <- "0"
+df$Payment_virement <- as.numeric(df$Payment_virement)
+
+## Recodage de df$PaymentMethod en df$Payment_carte
+df$Payment_carte <- df$PaymentMethod
+df$Payment_carte[df$PaymentMethod == "Bank transfer (automatic)"] <- "0"
+df$Payment_carte[df$PaymentMethod == "Credit card (automatic)"] <- "1"
+df$Payment_carte[df$PaymentMethod == "Electronic check"] <- "0"
+df$Payment_carte[df$PaymentMethod == "Mailed check"] <- "0"
+df$Payment_carte <- as.numeric(df$Payment_carte)
+
+## Recodage de df$PaymentMethod en df$Payment_cheque_postale
+df$Payment_cheque_postale <- df$PaymentMethod
+df$Payment_cheque_postale[df$PaymentMethod == "Bank transfer (automatic)"] <- "0"
+df$Payment_cheque_postale[df$PaymentMethod == "Credit card (automatic)"] <- "0"
+df$Payment_cheque_postale[df$PaymentMethod == "Electronic check"] <- "0"
+df$Payment_cheque_postale[df$PaymentMethod == "Mailed check"] <- "1"
+df$Payment_cheque_postale <- as.numeric(df$Payment_cheque_postale)
+
+```
+
+## 2.16 Recodage : variable à expliquer 
+
+```{r}
+table(df$Churn)
+```
+
+
+On transforme simplement la variable en une variable binaire numérique : 
+
+```{r}
+## Recodage de df$Churn en df$Churn_oui
+df$Churn_oui <- df$Churn
+df$Churn_oui[df$Churn == "No"] <- "0"
+df$Churn_oui[df$Churn == "Yes"] <- "1"
+df$Churn_oui <- as.numeric(df$Churn_oui)
+```
+
+
+
+## 2.17 Recodage : suppression des anciennes variables 
+
+On créer un nouveau df ne contenant que les variables recodées pour avoir un df propre. 
+
+```{r}
+df_rec = df %>% select(-c(gender,Partner,Dependents,PhoneService,MultipleLines,InternetService,OnlineSecurity,OnlineBackup, DeviceProtection, TechSupport,StreamingTV,StreamingMovies,Contract,PaperlessBilling,PaymentMethod,customerID, Churn))
+```
+
+
+
+# 3 Traitement des valeurs manquantes et aberrantes 
+
+## 3.1 Recherche de valeurs manquantes 
+
+La fonction suivante, vue dans différents cours, permet de connaître le nombre de valeurs manquantes par variables dans un df. 
+
+```{r}
+colSums(is.na(df_rec))
+```
+Les lignes comprenant des valeurs manquantes sont les suivantes : 
+
+```{r}
+val_manq = df_rec %>% filter(is.na(TotalCharges))
+val_manq
+```
+
+On observe qu'il n'y à pas vraiment de paterne récurent dans les profils présentants des valeurs manquantes. Compte tenu de leur très faible poids dans la base (11 lignes sur 7034 soit 0.001% de la base), il est inutile de se compliquer la tâche en cherchant à remplacer ces valeurs manquantes puisque cela ne changerait significativement rien à la modélisation plus tard. 
+
+Nous procédons donc simplement à la suppression de ces lignes ci de notre dataframe : 
+
+```{r}
+df_rec = df_rec %>% filter(!is.na(TotalCharges))
+```
+
+## 3.2 Recherche de valeurs aberrantes 
+
+Lors du recodage nous avons déjà pu constater qu'il nexistait pas de modalités pour lesquels il n'existe qu'un très faible nombre d'observations. 
+Par ailleurs, nous avons pu observer à cette occasion que les distributions des variables traitées durant cette étape étaient cohérentes avec la variable à expliquer. 
+
+Assurons nous qu'il en soit de même pour les autres variables : 
+
+```{r}
+summary(df_rec)
+```
+
+Nous constatons ici que aucun problème de cohérence n'est à déplorer : toutes les variables sont comprises dans les intervalles attendus et ont des distribtuions qui restent logiques et plausibles. Par exemple on voit qu'être un senior reste un péhnomène relativement rare (moyenne de 0.16 or la variable est binaire, donc cela signifie que 16% de l'échantillon est sénior) ou que le churn reste un phénomène minoritaire (26% d'occurence). 
+
+Autrement dit : notre jeu de données ne contient donc pas de valeurs aberrantes. 
+
+
+# 4 Analyse des liaisons 
+
+Nous allons maintenant procéder à l'étude de la liason entre les variables. Le but est d'identifier de potentiels liaisons trop fortes entre certaines variables pour éviter des problèmes de multicolinéarité lors de la modélisation. Nous pourrons en effet utiliser les informations de cette matrice au moment de la spécification du modèle. 
+
+Pour ce faire nous construisons donc la matrice suivante : 
+
+```{r}
+matrice_cor = cor(df_rec)
+matrice_cor
+```
+
+On remarque qu'il n'existe presque aucune liaisons trop fortes (>0.8) entre les variables explicatives en dehors de celle entre tenure et TotalCharges. Il faudra garder en tête cette information au moment de la construction du modèle. 
+
+# 5 Séparation du df en deux sous-échantillons : 
+
+Ici on va séparer le df en un df de train et un df de test. Le but va être d'estimer une régression logistique sur l'échantillon d'entrainement, puis d'utiliser les données de l'échantillon de test pour vérifier que le modèle ne souffre pas de sur-apprentissage, c'est à dire qu'il apprend bêtement des situations spécifiques au données d'entrainement. 
+
+Procéder à cette vérification permettra ainsi de savoir si, oui ou non, le modèle est utilisable sur de nouvelles données et ainsi juger de l'interêt de ce dernier d'un point de vue métier/business. La traditionelle répartion 70/30 nous semble ici correcte au vu de la taille de notre df.
+
+Ce code nous est issu d'une suggestion de l'IA pour faire cela : il permet de récupérer aléatoirement le numéro de ligne de 70% de l'échantillon. 
+On vient ensuite créer un df de train qui comprend uniquement les lignes correspondant à ces numéros, et un df de test qui contient les autres lignes (soit le df - les lignes dont on à récupérer le numéro).
+```{r}
+set.seed(42)
+
+indices <- sample(1:nrow(df_rec), size = 0.7 * nrow(df_rec))
+
+train_set <- df_rec[indices, ]
+test_set  <- df_rec[-indices, ]
+```
+
+
+On peut vérifier que la proportion de y=1 et y=0 est sensiblement la même dans les deux sous-échantillon (c'est en tout cas ce qu'on s'attend à avoir au vu de la taille de ces échantillons ) :
+
+```{r}
+table(train_set$Churn_oui)
+```
+Soit 25% de y = 1 pour l'échantillon d'entraînement.
+
+```{r}
+table(test_set$Churn_oui)
+```
+Et un peu moins de 26% de y = 1 pour l'échantillon de test.
+
+Nous n'avons donc pas de problèmes, qui aurait pu être causé par la création aléatoire des sous-échantillon, au niveau des proportions des modalités de la variables explicative. 
+
+
+# 6 Modélisation 
+
+Le but premier de cette modélisation est d'avoir un outil permettant de prévoir détécter le potentiel churn future des clients. Néanmoins nous exploiterons également la grande force de la régression logistique : sa facilité d'intérprétation, notamment en intérprétant les ods ratios pour expliquer les facteurs influants le plus fortement sur la probabilité de churn. 
+
+## 6.1 Première spécification 
+
+Nous allons commencer par un premier modèle 'bourrin' au sein duquel nous incluons toutes les variables explicatives possible. L'idée est ici d'avoir un premier ordre d'idée de la modélisation à mettre en place. Nous affinerons ensuite progressivement ce premier modèle jusqu'à aboutir à un modèle 'propre'. 
+
+```{r}
+reg1 = glm(Churn_oui ~ SeniorCitizen + tenure + TotalCharges + MonthlyCharges + Factu_ele_oui + Payment_carte  +  Payment_virement + Payment_cheque_postale +
+            Securite_oui + Protection_appareil_oui + Assitance_technique_oui + Streaming_oui + Film_Streaming  + Contrat_annu +  Contrat_deux_ans +
+            Femme + Partner_oui + Personne_a_charge_oui + Service_tel_non  + Plusieurs_numero_oui + Internet_DSL + Internet_Non 
+            ,data = train_set, family = binomial(logit))
+summary(reg1)
+```
+### 6.1.1 Commentaires sur la première spécification : 
+
+On observe la non significativité de la variable Monthlycharges. Par ailleurs on remarque que Totalcharges ~ MonthlyCharges * tenure, nous avons donc une linéaire presque parfaite ici ce qui va entraîner des problèmes au moment de l'estimation des coefficients. Enfin le coefficient de corrélation entre MonthlyCharges et TotalCharges étant élevé, cette dernière variable peut s'apparenter à un proxy de la variable MonthlyCharges
+Ces trois raisons nous ammènent à supprimer la variable MonthlyCharges de la seconde spécification. 
+
+
+De même on observe que les variables en liens avec le profil sociologique du client, à savoir son sexe 'Femme' et sa situation amoureuse 'Partner_oui', n'exercent aucun effet significatif sur la probabilité de churn. Nous procéderons donc à l'élimination de ces deux variables dans la prochaine spécification. 
+
+De même avoir un appareil protegé 'Protection_appareil_oui' et n'avoir aucun service téléphonique 'Service_tel_non', n'exercent aucune influence significative sur la probabilité de churn du client et seront donc éliminés lors de la prochaine spécification. 
+
+
+
+## 6.2 Seconde spécification 
+
+```{r}
+reg2 = glm(Churn_oui ~ SeniorCitizen + tenure + TotalCharges + Factu_ele_oui + Payment_carte  +  Payment_virement + Payment_cheque_postale +
+            Securite_oui + Assitance_technique_oui + Streaming_oui + Film_Streaming  + Contrat_annu +  Contrat_deux_ans +
+            Personne_a_charge_oui + Plusieurs_numero_oui + Internet_DSL + Internet_Non 
+            ,data = train_set, family = binomial(logit))
+summary(reg2)
+```
+### 6.2.1 Commentaire sur la seconde spécification : 
+
+On voit que les affinages apportés par rapport à un modèle plus lourd permettent d'avoir un résutat de meilleur qualités : les effets estimés sont ici plus nets et plus significatifs. Toutes nos variables sont significatives à au moins 7%. Nous n'attribuerons donc pas les résultats estimés par ce modèle à des aléas d'échantillonage. 
+
+Le modèle nous semblant être cohérent, procédons désormais à une évaluation de ses performances :
+
+### 6.2.2 Evaluation des performances du second modèle : 
+
+#### 6.2.2.1 Matrice de confusion du train :
+
+Soit le code suivant permettant de générer la matrice de confusion sous R du modèle d'entraînement : 
+
+```{r}
+proba_esti_train <- predict(reg2, newdata = train_set, type = "response")
+predi_train <- factor(ifelse(proba_esti_train > 0.5, 1, 0), levels = c(0, 1))
+reels_train <- factor(train_set$Churn_oui, levels = c(0, 1))
+```
+
+Ce chunk permet d'obtenir la probabilité d'occurence du churn ('proba_esti_train'). La prédiction ('predi_train') du modèle est ensuite basé sur la règle de décision basique suivante : si la probabilité prédite est supérieure à 50%, alors on prédira l'occurence du churn, sinon on prédira sa non occurence. Enfin on récupère l'information sur ce qui à réelement eu lieu, c'est à dire l'occurence ou la non occurence réelle du churn pour chacun des clients du df d'entraînement ('reels_train'). 
+
+Notons que la règle de décision fondé sur le +/- 50% est très basique. Nous adoptons cette dernière uniquement dans le but de s'assurer que le modèle ne sur-apprend pas. On cherchera à l'optimiser dans la dernière spécification.
+
+```{r}
+confusionMatrix(predi_train, reels_train, positive = "1")
+```
+Soit un taux de rappel de 54%, un accuracy de 80% et un taux de précision de 66% sur le modèle d'entrainement. 
+
+Rappelons que cela signifie que le modèle capte 54% des churns réels, que 80% des prédictions faites par ce dernier s'avèrent être juste et que lorsqu'il prédit le churn pour un client, il y à 66% de chances que cela soit effectivement vrai. 
+
+Encore une fois, nous chercherons à optimiser ces indicateurs lors de la prochaine spécification, chercons pour l'instant à vérifier que le modèle ne sur-apprend pas.
+
+#### 6.2.2.2 Matrice de confusion du test : 
+
+```{r}
+proba_test <- predict(reg2, newdata = test_set, type = "response")
+predi_test <- factor(ifelse(proba_test > 0.5, 1, 0), levels = c(0, 1))
+reels_test <- factor(test_set$Churn_oui, levels = c(0, 1))
+```
+
+On utilise ici les coefficeints estimés sur le df d'entrainement pour obtenir les probabilités prédites par le modèle sur le df de test 'proba_test'. On applique la même règle de décision que précédemment pour obtenir la prédiction du modèle 'predi_test'. Enfin on récupère les informations réels sur le churn, ou non, des clients 'reels_test'. 
+
+Nous pouvons ainsi construire la matrice de confusion suivante :
+
+```{r}
+confusionMatrix(predi_test, reels_test, positive = "1")
+```
+Nous avons ici un taux de rappel de 54%, un accuracy de 80% et un taux de précision de 63%. Ces indicateurs sont sensiblement les mêmes que pour l'échantillon d'entraînement : le modèle ne sur-apprend pas. Nous chercherons donc désormais à optimiser les détails. 
+
+
+## 6.3 Troisième spécification 
+
+Cette troisème et dernière spécification aura pour objectif de régler les derniers détails pour avoir un outil le plus pratique et intéressant d'un point de vue business possible. 
+
+Mat cor avec les valeurs restantes : 
+```{r}
+df_v2 = train_set %>% select(-MonthlyCharges, -Femme, -Partner_oui, -Protection_appareil_oui, -Service_tel_non)
+mat_cor_V2 = cor(df_v2)
+mat_cor_V2
+```
+
+Sur cette matrice nous voyons que la seule dernière grosse liaisons existantes entre les variables explicatives est celle entre 'tendure' et 'TotalCharges' (0.82). Dans les faits c'est parfaitement logique : tendure représente l'ancienneté d'un client, or plus un client est ancien plus l'on peut s'attendre à ce que ce dernier ait dépensé beaucoup. 
+
+Néanmoins les deux variables sont fortement liés à la variable à expliquer et ont un effet estimé très significatif. Supprimer l'une d'entre elle risque de conduire à une baisse de performance des indicateurs que nous cherchons ici à optimiser (à savoir ceux issus de la matrice de confusion) puisque le modèle perd en 'informations utiles'.
+
+Nous choisissons donc de conserver ces deux variables, tout en gardant à l'esprit que ce choix réduit le caractère explicatif du modèle puisque le modèle va peiner à donner une estimation fidèle à la réalité de ces deux effets.
+
+La spécification reste donc ici inchangée.
+
+### 6.3.1 Optimisation de la règle de décision :
+
+L'objectif "business" du modèle est d'éviter que des clients ne quitte l'entreprise. Le modèle doit donc détecter le plus large nombre possible d'entre eux de manière à pouvoir mettre en place des actions préventives. Ainsi c'est ici le taux de rappel que l'on va chercher à augmenter. 
+
+Sachant que y = 1 ne représente que environ 25% des cas, la règle selon laquelle on prédira un churn si et seuelement si la probabilité estimé par le modèle est > à 50% pénalise injustement cette indicateur car le modèle va naturellement tendre à estimer des probabilités légèrement plus légère que si on avait eu 50% de y = 1. Nous allons abaisser ce seuil pour contrer ce biais et favoriser le taux de rappel, qui est ici, d'un point de vue business, l'indicateur à privilégier. 
+
+#### 6.3.1.1 Seuil à 40 % :
+
+```{r}
+proba_esti_train <- predict(reg2, newdata = train_set, type = "response")
+predi_train <- factor(ifelse(proba_esti_train > 0.4, 1, 0), levels = c(0, 1))
+reels_train <- factor(train_set$Churn_oui, levels = c(0, 1))
+
+confusionMatrix(predi_train, reels_train, positive = "1")
+```
+L'abaissement du seuil de décision à 40% conduit à une amélioration significative du taux de rappel (passant de 54% à 66%) moyennant une légère baisse de l'accuracy (1 point de pourcentage) et de la précision (6 points de pourcentage).
+
+#### 6.3.1.2 Seuil à 35% : 
+
+```{r}
+proba_esti_train <- predict(reg2, newdata = train_set, type = "response")
+predi_train <- factor(ifelse(proba_esti_train > 0.35, 1, 0), levels = c(0, 1))
+reels_train <- factor(train_set$Churn_oui, levels = c(0, 1))
+
+confusionMatrix(predi_train, reels_train, positive = "1")
+```
+Le taux de rappel commence à être correcte au vu de notre objectif (72%) ce qui est acquis au moyen d'une baisse du taux de précision (57%) acceptable au vu du contexte business de ce modèle.
+
+
+
+#### 6.3.1.3 Seuil à 30% : 
+
+```{r}
+proba_esti_train <- predict(reg2, newdata = train_set, type = "response")
+predi_train <- factor(ifelse(proba_esti_train > 0.3, 1, 0), levels = c(0, 1))
+reels_train <- factor(train_set$Churn_oui, levels = c(0, 1))
+
+confusionMatrix(predi_train, reels_train, positive = "1")
+```
+Un seuil de décision à 30% permet d'avoir un taux de rappel satisfsaisant au vu de notre objectif : 77%.
+En revanche le taux de précision commence à devenir relativement faible puisqu'il passe à 54%. Quant à lui l'accuracy ne bouge pratiquement pas. 
+
+Nous ne testerons pas de seuil inférieur à 30% car passé ce cap le taux de précision va devenir trop faible : plus de la moitié des charges engagés par l'entreprise pour éviter le churn de clients seront inutiles, précisemment car ils seront engagés à l'égard de clients qui ne comptent pas la quitter. 
+
+Nous retiendrons donc un seuil de 30% comme pour la règle de décision. 
+
+#### 6.3.1.4 Vérification sur l'échantillon test :
+
+Les seuils ont été comparés sur l'échantillon d'entraînement. On vérifie maintenant le seuil de 30% sur l'échantillon test, que le modèle n'a jamais vu.
+
+```{r}
+proba_esti_test <- predict(reg2, newdata = test_set, type = "response")
+predi_test <- factor(ifelse(proba_esti_test > 0.3, 1, 0), levels = c(0, 1))
+reels_test <- factor(test_set$Churn_oui, levels = c(0, 1))
+
+confusionMatrix(predi_test, reels_test, positive = "1")
+```
+Sur l'échantillon test, le seuil de 30% donne un rappel de 78%, une précision de 53% et une accuracy de 76% : des résultats presque identiques à ceux de l'entraînement. Le modèle ne sur-apprend pas et le seuil tient sur de nouvelles données.
+
+## 6.4 Formule de score : 
+
+A partir des coefficients estimés par notre modèle, nous pouvons reconstituer la formule de score. Cette formule permet, pour tout nouveau client, de calculer sa probabilité estimée de churn à partir de ses caractéristiques et d'en déduire une prédiction fiable sur son futur churn ou non churn.
+
+```{r}
+coefficients = coef(reg2)
+round(coefficients, 4)
+```
+
+La probabilité de churn est donc donnée par la formule suivante :
+
+**P(Churn) = 1 / (1 + e^(-z))**
+
+Avec : 
+
+**z = 0.5154 + 0.1829 x SeniorCitizen − 0.0533 x tenure + 0.0002 x TotalCharges + 0.3738 x Factu_ele_oui − 0.4632 x Payment_carte − 0.3571 × Payment_virement − 0.4032 × Payment_cheque_postale − 0.4411 × Securite_oui − 0.4116 × Assitance_technique_oui + 0.3144 × Streaming_oui + 0.1993 × Film_Streaming − 0.6310 × Contrat_annu − 1.4121 × Contrat_deux_ans − 0.1904 × Personne_a_charge_oui + 0.2113 × Plusieurs_numero_oui − 0.6027 × Internet_DSL − 1.3546 × Internet_Non**
+
+Dès lors que cette probabilité estimé dépasse 30%, nous pouvons raisonablement supposer que le client va quitter l'entreprise. Une action devra alors être mise en place pour éviter son départ. 
+
+## 6.5 Interpretation des ODS Ratios :
+
+Les Odds Ratios (OR) nous permettent d'interpréter directement l'effet de chaque variable explicative sur la probabilité de churn. 
+
+Calculons les OR à partir des coefficients estimés par notre modèle final :
+```{r}
+OR = exp(coef(reg2))
+OR
+```
+### 6.5.1 Ancienneté et montant total dépensé
+
+Chaque mois d'ancienneté supplémentaire réduit la probabilité de churn de 5.2% (OR = 0.948). Autrement dit, plus un client est ancien, plus il est stable : la fidélisation dans la durée est donc un levier de rétention efficace.
+
+TotalCharges présente un OR de 1.000 : l'effet est statistiquement présent mais négligeable à l'échelle individuelle un dollar supplémentaire dépensé ne modifie pas de manière perceptible la probabilité de churn. Pour avoir une meilleure appréciation, nous pouvons modifier cette échelle en sachant que le coefficient de TotalCharges = 0.0002. Soit exp(0.0002*1000) = 
+
+```{r}
+exp(0.2)
+```
+Chaque millier de $ de dépense supplémentaires va conduire à une augmentation de 22 % de la probabilité de churn. 
+
+NB : Il faut néanmoins rester prudent sur la valeur exactes de ce OR estimé : la forte relation entre tenure et TotalCharges peut biaiser légérement l'estimation de ces coefficients. 
+
+### 6.5.2 Profil sociologique
+
+'SeniorCitizen' affiche un OR de 1.201 (+20.1%), être âgé conduit à une augmentation majeure de la probabilité de churn. 
+A l'inverse 'Personne_a_charge_oui' présente un OR de 0.827 (-17.3%) : avoir des enfants réduit considérablement la probabilité de churn.
+
+Notons que ces deux informations ne sont donnés qu'à titre informatif car l'entreprise ne pourra pas jouer sur ces critères pour tenter d'empêcher le churn. 
+
+### 6.5.3 Type de contrat
+
+C'est ici que l'on observe les effets les plus forts du modèle.Un client sous contrat annuel a une probabilité de churn réduite de 46.8% par rapport à un client sous contrat mensuel (notre référence). 
+
+Cet effet est encore plus marqué pour un contrat de deux ans : la probabilité de churn est réduite de 75.6% (OR = 0.244) par rapport à la référence.
+
+D'un point de vue business il faut donc encourager les clients à souscrire à des engagements longue durée au moment de la souscription des contrats.
+
+### 6.5.4 Type d'accès internet
+
+Les clients en DSL ont une probabilité de churn réduite de 45.3% par rapport aux clients en fibre (OR = 0.547). Pour les clients sans internet, 
+cette réduction atteint 74.2% .
+
+Ce résultat peut s'expliquerpar le fait que les clients fibre, plus connectés et plus exposés aux offres concurrentes en ligne, sont naturellement plus suceptibles de partir. Les clients sans internet sont à l'inverse les plus stables.
+
+### 6.5.5 Services additionnels
+
+Souscrire à un service de sécurité en ligne réduit la probabilité de churn de 35.7% , et disposer d'une assistance technique la réduit 
+de 33.7%. Il semble donc que ces services soient générateurs d'une valeur très apprécié par les clients. 
+
+A l'inverse, avoir un service de streaming TV augmente la probabilité de churn de 36.9%. L'effet du streaming de films est plus modéré (+22.1%) mais demeure important également. Comme pour le cas de la fibre, on peut supposer que cela s'explique par un profil de client peut être plus actif en ligne et donc exposer à plus d'offres concurentes. 
+
+### 6.5.6 Modalité de paiement et facturation
+
+La facturation électronique augmente la probabilité de churn de 45.3% par rapport au paiement par cheque postale qui nous sert de référence. De même on peut supposer qu'il s'agit la d'un profil de client beaucoup plus actif en ligne. 
+
+Les clients payant par carte bancaire ont une probabilité de churn réduite de 37.1% ce qui s'explique surement par un désinterêt pour l'achat, la CB étant généralement utilisé pour des achats courants. 
+
+### 6.5.7 Lignes téléphoniques multiples
+
+Avoir plusieurs numéros augmente la probabilité de churn de 23.5%. Encore une fois cela rejoint l'hypothèse selon laquelle les clients les plus propices au churn sont ceux qui ont une activité plus prononcé avec les outils numériques car ils sont donc exposés à plus de pubs. 
+
+
+# 7 Profil des clients dont le churn est averé 
+
+Pour conclure nous pouvons chercher à analyser plus en détails le profil des clients dont le churn à été observé. 
+
+On commence par récupérer les informations sur ces derniers : 
+
+```{r}
+df_churn = df_rec %>% filter(Churn_oui == 1)
+df_reste = df_rec %>% filter(Churn_oui == 0) # Et sur ceux qui restent pour comparer
+```
+
+Puis on peut regarder les statistiques descriptives relatives à ces derniers : 
+
+```{r}
+summary(df_churn)
+```
+
+Et comparer ces informations aux clients fidèles : 
+
+```{r}
+summary(df_reste)
+```
+La comparaison des moyennes est sans équivoque : Il n'y à même pas besoin de faire de test d'inférence statistiques ici pour voir la différence entre ces deux sous-populations sur la base des critères mentionnés plus tôt, tant la différence en terme de moyenne est importante. 
+
+Par exemple nous avions vu que l'ancienneté est un facteur qui réduisait significativement le risque de churn. On voit dans nos données qu'en moyenne les clients qui partent n'ont que 18 mois d'ancienneté contre 38 pour ceux qui restent soit 2 fois plus. 
+
+De même parmis ceux qui partent seuls 8% ont un contrat annuel (pour rappel la moyenne peut se lire ici comme une proportion car la variable est recodé de facon binaire 0/1) et 2% ont un contrat sur deux ans. A l'inverse parmis ceux qui restent 25% ont un contrat annuel et 31% ont un contrat sur deux ans. La différence est tel que le test d'inférence en devient inutile : avec un tel écart il est clair que même pour alpha = 1% on va retrouver une différence significative. 
+
+Pareillement, on constate que parmis les clients qui partent, seul 16% d'entre eux disposent d'une assistance technique contre 33% pour ceux qui restent. 
+
+Nous n'allons pas comparer chacune des variables une à une car cela reviendrait à alourdir inutilement l'analyse. En effet de manière générale la comparaison entre ces deux groupes et la lecture des ODS ratios révèlent que les clients qui partent sont des clients aux contrats moins sophistiqués (abonemment mensuel au lieu d'annuels, sans options d'assistances techniques, de sauvegarde, de protections etc...) et étant potentiellement davantages exposés à des offres en lignes. 
+
+Une fois le churn potentiel d'un client detecté, l'entreprise doit donc mettre en place des actions jouant sur ces deux leviers pour tenter d'éviter ce dernier (nous insisterons dessus dans le rapport métier).
+
+
+# 8 Visualisations et statistiques descriptives pour le rapport métier :
+
+Cette dernière section sert juste à fournir les quelques visualisations et statistiques descriptives utiles au rapport métier
+
+## 8.1 Taux de churn 
+
+Taux de churn dans la base 
+
+```{r}
+df_viz = df %>% mutate(
+  Churn = as.factor(Churn)
+)
+
+ggplot(df, mapping = aes (x = Churn, fill = Churn ))+
+  geom_bar()+
+  labs(title = "                                      Le churn concerne une minorité de clients", y = "Nombre de clients concernés")+
+  theme_minimal()
+```
+
+## 8.2 Churn selon le type de contrat
+
+Churn en fonction du type de contrat : 
+
+```{r}
+ggplot(df, mapping = aes(x = Contract , fill = Churn))+
+  geom_bar()+
+  labs(title = "                      Le type de contrat joue beaucoup sur la fidelité des clients ", x = "Type de contrat", y = "Nombre de clients concernés")+
+  theme_minimal()
+```
+
+% de churn en fonction du contrat 
+
+Contrat mensuel : 
+
+```{r}
+mois = df %>% filter(Contract == "Month-to-month")
+
+prop.table(table(mois$Churn_oui))
+```
+
+Contrat annuel : 
+
+```{r}
+annee = df %>% filter(Contract == "One year")
+
+prop.table(table(annee$Churn_oui))
+```
+
+Contrat bi-annuel : 
+
+```{r}
+biannu = df %>% filter(Contract == "Two year")
+
+prop.table(table(biannu$Churn_oui))
+```
+
+Nombre de clients par contrats :
+```{r}
+table(df$Contract)
+```
+
+## 8.3 Impact du support technique 
+
+Remanipulation rapide du df pour faire le graphique plus rapidement :
+```{r}
+df_rec = df %>% select(-c(gender,Partner,Dependents,PhoneService,MultipleLines,InternetService,OnlineSecurity,OnlineBackup, DeviceProtection, TechSupport,StreamingTV,StreamingMovies,Contract,PaperlessBilling,PaymentMethod,customerID))
+```
+
+
+```{r}
+ggplot(df_rec, mapping = aes (x = Assitance_technique_oui, fill = Churn))+
+  geom_bar()+
+  scale_x_continuous(name = "Assistance technique",breaks = c(0, 1),labels = c("non", "oui"))+
+  labs(title = "        Les clients disposants d'une assistance technique sont plus fidèles ", y = "Nombre de clients concernés")+
+  theme_minimal()
+```
+taux de churn 
+
+```{r}
+support = df_rec %>% filter(Assitance_technique_oui == 1)
+
+prop.table(table(support$Churn_oui))
+```
+
+## 8.4 Churn et exposition numérique : un exemple 
+
+```{r}
+facture = df_rec %>% filter(Factu_ele_oui == 1)
+
+prop.table(table(facture$Churn_oui))
+```
+
